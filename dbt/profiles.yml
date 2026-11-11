@@ -5,6 +5,9 @@ ledger_recon:
       type: duckdb
       path: "{{ env_var('WAREHOUSE_PATH', 'data/warehouse.duckdb') }}"
       threads: 4
+      settings:
+        # All dates and daily buckets in UTC, whatever the machine's timezone
+        TimeZone: UTC
     # Production target (same models, swap the adapter):
     # prod:
     #   type: athena
