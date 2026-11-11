@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: fct_trade_reconciliation
+    description: >
+      One row per trade, reconciled across exchange, ledger and provider statement.
+      Each break gets a single status (checked in order of severity) and the USD
+      exposure at stake.
+    columns:
+      - name: trade_id
+        data_tests: [unique, not_null]
+      - name: trade_date
+        data_tests: [not_null]
+      - name: recon_status
+        description: matched, or the break type.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - matched
+                  - missing_in_exchange
+                  - missing_in_ledger
+                  - duplicate_in_ledger
+                  - missing_in_statement
+                  - amount_mismatch
+                  - fee_mismatch
+                  - late_settlement
+      - name: exposure_usd
+        description: USD at stake for the break (0 when matched).
+        data_tests: [not_null]
+
+  - name: rpt_daily_reconciliation
+    description: Daily reconciliation KPIs (match rate, breaks by type, exposure).
+    columns:
+      - name: trade_date
+        data_tests: [unique, not_null]
+      - name: match_rate_pct
+        data_tests: [not_null]
