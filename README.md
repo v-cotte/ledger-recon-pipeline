@@ -1,0 +1,108 @@
+# Ledger Reconciliation Pipeline
+
+An automated daily reconciliation between what happened on the exchange, what the platform booked in its ledger, and what the provider says settled. Every mismatch gets a cause and a USD exposure, so Accounting and Treasury start the day with a list of breaks instead of a spreadsheet.
+
+Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
+
+## The problem
+
+Every trade exists in three places, and they should agree:
+
+| Source | What it says | In production |
+|---|---|---|
+| Exchange | What actually executed | Exchange / broker API |
+| Ledger | What we booked | Application Postgres |
+| Provider statement | What settled | Custodian / bank / venue statements |
+
+When they don't agree, someone has to find out why. This pipeline classifies every trade into one status:
+
+| Status | Meaning |
+|---|---|
+| `matched` | All three agree (within a 2-cent rounding tolerance) |
+| `missing_in_ledger` | Executed and settled, never booked |
+| `duplicate_in_ledger` | Booked more than once |
+| `missing_in_statement` | Booked, but the provider never reported it settled |
+| `amount_mismatch` | Booked amount differs from the settled amount |
+| `fee_mismatch` | Booked fee differs from the provider's fee |
+| `late_settlement` | Settled later than T+1 |
+| `missing_in_exchange` | Booked or settled with no matching execution |
+
+## Architecture
+
+```mermaid
+flowchart LR
+    K[Kraken API<br/>BTC/USD trades] --> I
+    I[ingest_trades DAG<br/>daily, retries, backfill] --> B[(Bronze<br/>Parquet, dt= partitions)]
+    B -- asset event --> T[transform_reconciliation DAG]
+    T --> S[(Silver<br/>typed, deduplicated,<br/>incremental)]
+    S --> G[(Gold<br/>fct_trade_reconciliation<br/>rpt_daily_reconciliation)]
+    G --> R[Break report<br/>+ exposure alert]
+```
+
+- **Ingestion** (`ingestion/`): pulls one UTC day of trades and lands it as Hive-partitioned Parquet (`bronze/<dataset>/dt=YYYY-MM-DD/`). Each run replaces its partition, so retries and backfills are idempotent.
+- **Ledger and statement are simulated** from the real trades, with about 1% of trades given a planted break of each type. Every planted break is recorded in a ground-truth table.
+- **Orchestration** (`dags/`): `ingest_trades` runs daily with exponential-backoff retries. When it lands data it updates the `lake_bronze` asset, which triggers `transform_reconciliation` (asset-driven scheduling, no clock coupling).
+- **Transformation** (`dbt/`): bronze views over the raw files, silver models that type and deduplicate (exchange trades are incremental with `delete+insert`), and gold models with the reconciliation and daily KPIs.
+
+## Testing the reconciliation, not just the pipeline
+
+`dbt build` runs 36 tests. Beyond `unique` / `not_null` / `accepted_values`:
+
+- **`assert_recon_finds_every_planted_break`**: compares the gold model against the simulator's ground truth. It fails if any planted break is missed, misclassified, or if a clean trade is flagged. It was mutation-tested: widening the tolerance to $100 makes it fail on the 42 missed breaks; setting it to $0 makes it fail on 1,045 false positives from provider rounding.
+- **`assert_daily_report_reconciles_to_detail`**: the daily KPIs must add up to the trade-level detail.
+- **`assert_trade_date_is_utc_execution_date`**: guards against timezone bugs in trade dates (one existed during development).
+
+## Sample output
+
+```
+trade_date  trades  breaks  match_rate_pct  exposure_usd
+2026-11-01     300      18           94.00     28,974.88
+2026-11-02     300      18           94.00     18,968.57
+2026-11-03     300      18           94.00     29,869.72
+```
+
+## Running it
+
+**Without Airflow** (fastest, Python 3.11+):
+
+```bash
+pip install -r requirements.txt
+./scripts/run_local.sh 2026-11-01 2026-11-07 synthetic   # or: kraken
+```
+
+**With Airflow 3** (Docker):
+
+```bash
+docker compose up --build        # UI at http://localhost:8080
+INGEST_SOURCE=synthetic docker compose up --build   # offline
+```
+
+Trigger `ingest_trades` from the UI; `transform_reconciliation` runs automatically when it finishes. To backfill a week:
+
+```bash
+docker compose exec airflow airflow backfill create --dag-id ingest_trades \
+  --from-date 2026-11-02 --to-date 2026-11-08
+```
+
+## From local to production
+
+The design maps one-to-one to an AWS lakehouse:
+
+| Here | Production |
+|---|---|
+| Local Parquet (`data/lake/bronze/...`) | S3, same `dt=` layout |
+| DuckDB `read_parquet` sources | Glue Data Catalog tables |
+| dbt-duckdb | dbt-athena with `table_type: iceberg` (target stubbed in `dbt/profiles.yml`) |
+| `airflow standalone` in Docker | Airflow on Kubernetes / Astronomer |
+| Simulated ledger | CDC from the app's Postgres (Airbyte / DMS) |
+| Log warning on high exposure | Slack / PagerDuty alert to the Accounting on-call |
+
+## Project structure
+
+```
+ingestion/   sources (Kraken, synthetic), simulator with planted breaks, lake writer
+dags/        ingest_trades (daily, retries, backfill) · transform_reconciliation (asset-driven)
+dbt/         bronze → silver → gold models, schema + singular tests
+scripts/     run_local.sh
+.github/     CI: ingest a week, dbt build, re-run a day to check idempotency
+```
