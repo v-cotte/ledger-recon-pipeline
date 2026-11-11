@@ -1,13 +1,15 @@
 {{
     config(
         materialized = 'incremental',
-        unique_key = 'trade_id',
+        unique_key = 'trade_date',
         incremental_strategy = 'delete+insert'
     )
 }}
 
--- One row per exchange trade. Incremental: on each run only the latest
--- partitions are reprocessed, and re-running a day replaces it (idempotent).
+-- One row per exchange trade. Incremental with partition-overwrite semantics:
+-- each run deletes every row for the trade dates it reprocesses, then inserts
+-- them again. Keying on trade_date (not trade_id) matters: if a day is re-run
+-- with fewer trades, rows that disappeared upstream are removed here too.
 
 with source as (
 
