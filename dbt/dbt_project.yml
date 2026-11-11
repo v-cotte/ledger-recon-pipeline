@@ -1,0 +1,25 @@
+name: ledger_recon
+version: "1.0.0"
+profile: ledger_recon
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+vars:
+  # Differences up to this many USD are treated as provider rounding, not breaks
+  amount_tolerance_usd: 0.02
+  # Trades are expected to settle on the trade date (T+0); more than this is late
+  max_settlement_lag_days: 1
+
+models:
+  ledger_recon:
+    bronze:
+      +materialized: view
+      +schema: bronze
+    silver:
+      +materialized: table
+      +schema: silver
+    gold:
+      +materialized: table
+      +schema: gold

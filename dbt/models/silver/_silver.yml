@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: slv_exchange_trades
+    description: Exchange trades, typed and deduplicated. Incremental by trade date.
+    columns:
+      - name: trade_id
+        data_tests: [unique, not_null]
+      - name: side
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['buy', 'sell']
+      - name: notional_usd
+        data_tests: [not_null]
+
+  - name: slv_ledger_entries
+    description: Ledger entries, typed. Duplicates are kept so the reconciliation can flag them.
+    columns:
+      - name: entry_id
+        data_tests: [unique, not_null]
+      - name: trade_ref
+        data_tests: [not_null]
+
+  - name: slv_provider_statement
+    description: Provider statement lines, typed and deduplicated.
+    columns:
+      - name: statement_line_id
+        data_tests: [unique, not_null]
+      - name: trade_ref
+        data_tests: [unique, not_null]

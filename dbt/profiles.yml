@@ -1,0 +1,17 @@
+ledger_recon:
+  target: local
+  outputs:
+    local:
+      type: duckdb
+      path: "{{ env_var('WAREHOUSE_PATH', 'data/warehouse.duckdb') }}"
+      threads: 4
+    # Production target (same models, swap the adapter):
+    # prod:
+    #   type: athena
+    #   s3_staging_dir: s3://<bucket>/athena-results/
+    #   s3_data_dir: s3://<bucket>/lake/
+    #   table_type: iceberg
+    #   region_name: us-east-1
+    #   database: awsdatacatalog
+    #   schema: recon
+    #   threads: 4

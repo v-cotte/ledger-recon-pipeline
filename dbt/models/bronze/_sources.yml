@@ -1,0 +1,37 @@
+version: 2
+
+sources:
+  - name: lake
+    description: >
+      Raw Parquet files landed by the ingestion job, Hive-partitioned by trade
+      date (dt=YYYY-MM-DD). Locally read with DuckDB; in production the same
+      layout lives in S3 and is registered in the Glue catalog.
+    meta:
+      external_location: "read_parquet('{{ env_var('LAKE_DIR', 'data/lake') }}/bronze/{name}/*/*.parquet', hive_partitioning = true)"
+    tables:
+      - name: exchange_trades
+        description: Executed trades (fills) from the exchange API.
+        columns:
+          - name: trade_id
+            data_tests: [not_null]
+      - name: ledger_entries
+        description: What the platform booked in its internal ledger.
+        columns:
+          - name: entry_id
+            data_tests: [not_null]
+          - name: trade_ref
+            data_tests: [not_null]
+      - name: provider_statement
+        description: What the venue / custodian reports as settled.
+        columns:
+          - name: statement_line_id
+            data_tests: [not_null]
+          - name: trade_ref
+            data_tests: [not_null]
+
+  - name: ground_truth
+    description: Breaks planted on purpose by the simulator. Used only by tests.
+    meta:
+      external_location: "read_parquet('{{ env_var('LAKE_DIR', 'data/lake') }}/_ground_truth/{name}/*/*.parquet', hive_partitioning = true)"
+    tables:
+      - name: planted_issues
