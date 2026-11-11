@@ -19,15 +19,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Ingest a week of synthetic data (offline, deterministic)
-        run: python -m ingestion.run --start 2026-11-01 --end 2026-11-07 --source synthetic
+      - name: Install dbt packages (Elementary)
+        run: dbt deps --project-dir dbt --profiles-dir dbt
 
-      - name: dbt build (models + tests, incl. planted-break test)
+      - name: Ingest 5 weeks of synthetic data (offline, deterministic)
+        run: python -m ingestion.run --start 2026-10-01 --end 2026-11-07 --source synthetic
+
+      - name: dbt build (models + tests, incl. planted-break test and Elementary monitors)
         run: |
           mkdir -p data
           dbt build --project-dir dbt --profiles-dir dbt
 
-      - name: Re-run a day to check idempotency
+      - name: Re-run a day with fewer trades to check idempotency
+        # If stale rows survived the re-run, the planted-break test would fail
         run: |
-          python -m ingestion.run --date 2026-11-07 --source synthetic
+          python -m ingestion.run --date 2026-11-07 --source synthetic --max-trades 150
           dbt build --project-dir dbt --profiles-dir dbt

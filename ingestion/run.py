@@ -19,13 +19,15 @@ from ingestion.sources import KrakenSource, SyntheticSource
 log = logging.getLogger("ingestion")
 
 
-def ingest_day(day: date, source: str, lake_dir: Path, max_trades: int = 300) -> dict[str, int]:
+def ingest_day(
+    day: date, source: str, lake_dir: Path, max_trades: int = 300, break_rate: float = 0.01
+) -> dict[str, int]:
     src = KrakenSource(max_trades=max_trades) if source == "kraken" else SyntheticSource(max_trades)
     trades = src.fetch(day)
     if not trades:
         raise RuntimeError(f"No trades returned for {day} from {source}")
 
-    ledger, statement, issues = simulate(day, trades)
+    ledger, statement, issues = simulate(day, trades, break_rate=break_rate)
     counts = {}
     for dataset, records in [
         ("exchange_trades", trades),
@@ -48,6 +50,10 @@ def main() -> None:
     parser.add_argument("--end", type=date.fromisoformat, help="inclusive")
     parser.add_argument("--source", choices=["kraken", "synthetic"], default="synthetic")
     parser.add_argument("--max-trades", type=int, default=300)
+    parser.add_argument(
+        "--break-rate", type=float, default=0.01,
+        help="share of trades per break type; raise it to simulate a bad day (e.g. 0.05)",
+    )
     parser.add_argument("--lake-dir", type=Path, default=Path(os.getenv("LAKE_DIR", "data/lake")))
     args = parser.parse_args()
 
@@ -59,7 +65,7 @@ def main() -> None:
         parser.error("pass --date or --start/--end")
 
     for day in days:
-        ingest_day(day, args.source, args.lake_dir, args.max_trades)
+        ingest_day(day, args.source, args.lake_dir, args.max_trades, args.break_rate)
 
 
 if __name__ == "__main__":

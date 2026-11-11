@@ -42,6 +42,7 @@ def transform_reconciliation():
     def dbt_build() -> str:
         return (
             f"cd {PROJECT_DIR} && "
+            f"{DBT_BIN} deps --project-dir dbt --profiles-dir dbt && "
             f"{DBT_BIN} build --project-dir dbt --profiles-dir dbt"
         )
 

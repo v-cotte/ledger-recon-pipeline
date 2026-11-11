@@ -6,6 +6,10 @@ model-paths: ["models"]
 test-paths: ["tests"]
 macro-paths: ["macros"]
 
+flags:
+  # Required by Elementary on dbt >= 1.8
+  require_explicit_package_overrides_for_builtin_materializations: false
+
 vars:
   # Differences up to this many USD are treated as provider rounding, not breaks
   amount_tolerance_usd: 0.02
@@ -23,3 +27,6 @@ models:
     gold:
       +materialized: table
       +schema: gold
+  elementary:
+    # Elementary stores test results and run metadata in its own schema
+    +schema: elementary

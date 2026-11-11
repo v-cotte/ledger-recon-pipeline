@@ -33,6 +33,33 @@ models:
   - name: rpt_daily_reconciliation
     description: Daily reconciliation KPIs (match rate, breaks by type, exposure).
     columns:
+      - name: breaks
+        description: Number of breaks that day.
+        data_tests:
+          # A sudden jump in breaks usually means an upstream bug, not bad luck
+          - elementary.column_anomalies:
+              arguments:
+                column_anomalies: [sum]
+                timestamp_column: trade_date
+                time_bucket: {period: day, count: 1}
+                training_period: {period: day, count: 30}
+                detection_period: {period: day, count: 2}
+                anomaly_sensitivity: 3
+              config:
+                severity: warn
+      - name: exposure_usd
+        description: USD at stake in that day's breaks.
+        data_tests:
+          - elementary.column_anomalies:
+              arguments:
+                column_anomalies: [sum]
+                timestamp_column: trade_date
+                time_bucket: {period: day, count: 1}
+                training_period: {period: day, count: 30}
+                detection_period: {period: day, count: 2}
+                anomaly_sensitivity: 3
+              config:
+                severity: warn
       - name: trade_date
         data_tests: [unique, not_null]
       - name: match_rate_pct

@@ -3,6 +3,17 @@ version: 2
 models:
   - name: slv_exchange_trades
     description: Exchange trades, typed and deduplicated. Incremental by trade date.
+    data_tests:
+      # Catches days where ingestion lands far fewer (or more) trades than usual
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: executed_at
+            time_bucket: {period: day, count: 1}
+            training_period: {period: day, count: 30}
+            detection_period: {period: day, count: 2}
+            anomaly_sensitivity: 3
+          config:
+            severity: warn
     columns:
       - name: trade_id
         data_tests: [unique, not_null]
@@ -16,6 +27,11 @@ models:
 
   - name: slv_ledger_entries
     description: Ledger entries, typed. Duplicates are kept so the reconciliation can flag them.
+    data_tests:
+      # Alerts if the upstream ledger schema changes (column added, dropped or retyped)
+      - elementary.schema_changes:
+          config:
+            severity: warn
     columns:
       - name: entry_id
         data_tests: [unique, not_null]
