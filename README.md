@@ -2,7 +2,7 @@
 
 An automated daily reconciliation between what happened on the exchange, what the platform booked in its ledger, and what the provider says settled. Every mismatch gets a cause and a USD exposure, so Accounting and Treasury start the day with a list of breaks instead of a spreadsheet.
 
-Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
+Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, **Elementary** anomaly monitoring, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
 
 ## The problem
 
@@ -42,15 +42,43 @@ flowchart LR
 - **Ingestion** (`ingestion/`): pulls one UTC day of trades and lands it as Hive-partitioned Parquet (`bronze/<dataset>/dt=YYYY-MM-DD/`). Each run replaces its partition, so retries and backfills are idempotent.
 - **Ledger and statement are simulated** from the real trades, with about 1% of trades given a planted break of each type. Every planted break is recorded in a ground-truth table.
 - **Orchestration** (`dags/`): `ingest_trades` runs daily with exponential-backoff retries. When it lands data it updates the `lake_bronze` asset, which triggers `transform_reconciliation` (asset-driven scheduling, no clock coupling).
-- **Transformation** (`dbt/`): bronze views over the raw files, silver models that type and deduplicate (exchange trades are incremental with `delete+insert`), and gold models with the reconciliation and daily KPIs.
+- **Transformation** (`dbt/`): bronze views over the raw files, silver models that type and deduplicate (exchange trades are incremental, overwriting whole trade dates so re-runs never leave stale rows), and gold models with the reconciliation and daily KPIs.
 
 ## Testing the reconciliation, not just the pipeline
 
-`dbt build` runs 36 tests. Beyond `unique` / `not_null` / `accepted_values`:
+`dbt build` runs 36 data tests plus 4 Elementary monitors (below). Beyond `unique` / `not_null` / `accepted_values`:
 
 - **`assert_recon_finds_every_planted_break`**: compares the gold model against the simulator's ground truth. It fails if any planted break is missed, misclassified, or if a clean trade is flagged. It was mutation-tested: widening the tolerance to $100 makes it fail on the 42 missed breaks; setting it to $0 makes it fail on 1,045 false positives from provider rounding.
 - **`assert_daily_report_reconciles_to_detail`**: the daily KPIs must add up to the trade-level detail.
 - **`assert_trade_date_is_utc_execution_date`**: guards against timezone bugs in trade dates (one existed during development).
+
+## Monitoring with Elementary
+
+Tests catch what you know can go wrong; [Elementary](https://github.com/elementary-data/elementary) monitors catch what you didn't anticipate. They learn a 30-day baseline per daily bucket and warn (without blocking the pipeline) when today looks off:
+
+| Monitor | Model | Catches |
+|---|---|---|
+| `volume_anomalies` | `slv_exchange_trades` | Days with far fewer or more trades than usual (a broken API page, a missed backfill), and missing recent days |
+| `column_anomalies` (sum of `breaks`) | `rpt_daily_reconciliation` | A sudden jump in breaks, usually an upstream bug rather than bad luck |
+| `column_anomalies` (sum of `exposure_usd`) | `rpt_daily_reconciliation` | Unusual USD at stake |
+| `schema_changes` | `slv_ledger_entries` | Columns added, dropped or retyped in the ledger source |
+
+To see them fire, simulate a bad day (fewer trades, more breaks) and rebuild:
+
+```bash
+python -m ingestion.run --date 2026-11-10 --source synthetic --max-trades 120 --break-rate 0.06
+dbt build --project-dir dbt --profiles-dir dbt
+# WARN volume_anomalies ... slv_exchange_trades
+# WARN column_anomalies ... rpt_daily_reconciliation (breaks)
+```
+
+Results land in the `elementary` schema (`elementary_test_results`, `data_monitoring_metrics`), ready for alerting or the Elementary UI.
+
+## Bugs this project caught in itself
+
+- **Timezone drift**: daily buckets were computed in the machine's local time, shifting trades across days (and making Elementary flag a normal day as an anomaly). Fixed by pinning the DuckDB session to UTC; `assert_trade_date_is_utc_execution_date` guards it.
+- **Zero-length intervals in Airflow 3**: plain `@daily` runs have no data interval, so a run would have ingested the current, incomplete day. Fixed with `CronDataIntervalTimetable`.
+- **Stale rows on re-runs**: the incremental model upserted by `trade_id`, so re-running a day with fewer trades left the missing ones behind. Fixed by overwriting by `trade_date`; CI re-runs a day with fewer trades to prove it.
 
 ## Sample output
 
@@ -67,7 +95,8 @@ trade_date  trades  breaks  match_rate_pct  exposure_usd
 
 ```bash
 pip install -r requirements.txt
-./scripts/run_local.sh 2026-11-01 2026-11-07 synthetic   # or: kraken
+./scripts/run_local.sh 2026-10-01 2026-11-07 synthetic   # or: kraken
+# Elementary monitors need ~30 days of history to learn a baseline
 ```
 
 **With Airflow 3** (Docker):
@@ -104,5 +133,5 @@ ingestion/   sources (Kraken, synthetic), simulator with planted breaks, lake wr
 dags/        ingest_trades (daily, retries, backfill) · transform_reconciliation (asset-driven)
 dbt/         bronze → silver → gold models, schema + singular tests
 scripts/     run_local.sh
-.github/     CI: ingest a week, dbt build, re-run a day to check idempotency
+.github/     CI: ingest 5 weeks, dbt build, re-run a day with fewer trades to check idempotency
 ```
