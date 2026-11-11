@@ -16,7 +16,7 @@ from pathlib import Path
 from airflow.sdk import Asset, dag, task
 
 PROJECT_DIR = os.getenv("PROJECT_DIR", "/opt/project")
-DBT_BIN = os.getenv("DBT_BIN", "/opt/dbt-venv/bin/dbt")
+DBT_BIN = os.getenv("DBT_BIN", "/home/airflow/dbt-venv/bin/dbt")
 LAKE_DIR = Path(os.getenv("LAKE_DIR", "/opt/project/data/lake"))
 WAREHOUSE_PATH = os.getenv("WAREHOUSE_PATH", "/opt/project/data/warehouse.duckdb")
 # Alert when a day has more than this many USD in open breaks

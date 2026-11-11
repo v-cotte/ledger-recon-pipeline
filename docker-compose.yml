@@ -15,7 +15,7 @@ services:
       PROJECT_DIR: /opt/project
       LAKE_DIR: /opt/project/data/lake
       WAREHOUSE_PATH: /opt/project/data/warehouse.duckdb
-      DBT_BIN: /opt/dbt-venv/bin/dbt
+      DBT_BIN: /home/airflow/dbt-venv/bin/dbt
       INGEST_SOURCE: ${INGEST_SOURCE:-kraken}   # set to "synthetic" to run offline
     volumes:
       - .:/opt/project
