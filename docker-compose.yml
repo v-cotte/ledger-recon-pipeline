@@ -1,0 +1,21 @@
+# Local Airflow 3 for the reconciliation pipeline.
+#   docker compose up --build   ->   http://localhost:8080
+services:
+  airflow:
+    build: .
+    command: standalone
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/project/dags
+      # Local demo only: skip the login screen
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "true"
+      PYTHONPATH: /opt/project
+      PROJECT_DIR: /opt/project
+      LAKE_DIR: /opt/project/data/lake
+      WAREHOUSE_PATH: /opt/project/data/warehouse.duckdb
+      DBT_BIN: /opt/dbt-venv/bin/dbt
+      INGEST_SOURCE: ${INGEST_SOURCE:-kraken}   # set to "synthetic" to run offline
+    volumes:
+      - .:/opt/project
