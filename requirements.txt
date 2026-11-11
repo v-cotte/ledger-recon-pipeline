@@ -1,0 +1,6 @@
+# Ingestion
+pyarrow>=17
+requests>=2.32
+duckdb>=1.1
+# Transformation
+dbt-duckdb==1.11.1
