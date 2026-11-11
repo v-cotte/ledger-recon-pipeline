@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  dbt-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Ingest a week of synthetic data (offline, deterministic)
+        run: python -m ingestion.run --start 2026-11-01 --end 2026-11-07 --source synthetic
+
+      - name: dbt build (models + tests, incl. planted-break test)
+        run: |
+          mkdir -p data
+          dbt build --project-dir dbt --profiles-dir dbt
+
+      - name: Re-run a day to check idempotency
+        run: |
+          python -m ingestion.run --date 2026-11-07 --source synthetic
+          dbt build --project-dir dbt --profiles-dir dbt
