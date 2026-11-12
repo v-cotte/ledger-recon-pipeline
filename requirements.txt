@@ -2,5 +2,7 @@
 pyarrow>=17
 requests>=2.32
 duckdb>=1.1
+# Serving layer (gold -> Postgres for BI)
+psycopg[binary]>=3.2
 # Transformation
 dbt-duckdb==1.11.1
