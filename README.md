@@ -2,7 +2,7 @@
 
 An automated daily reconciliation between what happened on the exchange, what the platform booked in its ledger, and what the provider says settled. Every mismatch gets a cause and a USD exposure, so Accounting and Treasury start the day with a list of breaks instead of a spreadsheet.
 
-Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, **Elementary** anomaly monitoring, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
+Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, **Elementary** anomaly monitoring, a **Metabase** dashboard, **Terraform** for the AWS side, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
 
 ## The problem
 
@@ -37,12 +37,15 @@ flowchart LR
     T --> S[(Silver<br/>typed, deduplicated,<br/>incremental)]
     S --> G[(Gold<br/>fct_trade_reconciliation<br/>rpt_daily_reconciliation)]
     G --> R[Break report<br/>+ exposure alert]
+    G --> P[(Postgres<br/>serving layer)]
+    P --> M[Metabase<br/>dashboard]
 ```
 
 - **Ingestion** (`ingestion/`): pulls one UTC day of trades and lands it as Hive-partitioned Parquet (`bronze/<dataset>/dt=YYYY-MM-DD/`). Each run replaces its partition, so retries and backfills are idempotent.
 - **Ledger and statement are simulated** from the real trades, with about 1% of trades given a planted break of each type. Every planted break is recorded in a ground-truth table.
 - **Orchestration** (`dags/`): `ingest_trades` runs daily with exponential-backoff retries. When it lands data it updates the `lake_bronze` asset, which triggers `transform_reconciliation` (asset-driven scheduling, no clock coupling).
 - **Transformation** (`dbt/`): bronze views over the raw files, silver models that type and deduplicate (exchange trades are incremental, overwriting whole trade dates so re-runs never leave stale rows), and gold models with the reconciliation and daily KPIs.
+- **Serving** (`serving/`): after each successful build, gold tables are copied to Postgres with an atomic table swap, so Metabase never sees a half-loaded table and never locks the DuckDB warehouse (which allows a single writer).
 
 ## Testing the reconciliation, not just the pipeline
 
@@ -102,7 +105,7 @@ pip install -r requirements.txt
 **With Airflow 3** (Docker):
 
 ```bash
-docker compose up --build        # UI at http://localhost:8080
+docker compose up --build        # Airflow: http://localhost:8080 · Metabase: http://localhost:3000
 INGEST_SOURCE=synthetic docker compose up --build   # offline
 ```
 
@@ -112,6 +115,10 @@ Trigger `ingest_trades` from the UI; `transform_reconciliation` runs automatical
 docker compose exec airflow airflow backfill create --dag-id ingest_trades \
   --from-date 2026-11-02 --to-date 2026-11-08
 ```
+
+## Dashboard
+
+Metabase reads the gold tables from the Postgres serving layer: match rate over time, breaks by type, USD exposure per day, and the list of open breaks sorted by exposure. Setup and the five queries: [docs/metabase.md](docs/metabase.md).
 
 ## Infrastructure as code
 
@@ -130,14 +137,17 @@ The design maps one-to-one to an AWS lakehouse:
 | Manual setup | `infra/terraform`: S3 + Glue + Athena + IAM |
 | Simulated ledger | CDC from the app's Postgres (Airbyte / DMS) |
 | Log warning on high exposure | Slack / PagerDuty alert to the Accounting on-call |
+| Postgres serving copy for Metabase | Metabase querying gold Iceberg tables through Athena directly |
 
 ## Project structure
 
 ```
 ingestion/   sources (Kraken, synthetic), simulator with planted breaks, lake writer
-dags/        ingest_trades (daily, retries, backfill) · transform_reconciliation (asset-driven)
+serving/     publishes gold tables to Postgres for Metabase
+dags/        ingest_trades (daily, retries, backfill) · transform_reconciliation (asset-driven: dbt build → publish + report)
 dbt/         bronze → silver → gold models, schema + singular tests
 scripts/     run_local.sh
+docs/        Metabase dashboard setup
 infra/       Terraform for the AWS lakehouse (S3, Glue, Athena, IAM)
 .github/     CI: ingest 5 weeks, dbt build, re-run a day with fewer trades; terraform fmt + validate
 ```
