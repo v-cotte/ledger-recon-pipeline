@@ -1,0 +1,3 @@
+environment = "dev"
+region      = "us-east-1"
+# pipeline_trusted_principal_arns = ["arn:aws:iam::123456789012:role/airflow-workers"]
