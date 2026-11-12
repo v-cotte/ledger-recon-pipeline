@@ -1,4 +1,4 @@
-"""Bronze -> silver -> gold with dbt, then report breaks.
+"""Bronze -> silver -> gold with dbt, then publish gold for BI and report breaks.
 
 Asset-driven: runs whenever `ingest_trades` updates the `lake_bronze` asset,
 instead of on a clock, so transformations never run on half-landed data.
@@ -21,6 +21,7 @@ LAKE_DIR = Path(os.getenv("LAKE_DIR", "/opt/project/data/lake"))
 WAREHOUSE_PATH = os.getenv("WAREHOUSE_PATH", "/opt/project/data/warehouse.duckdb")
 # Alert when a day has more than this many USD in open breaks
 EXPOSURE_ALERT_USD = float(os.getenv("EXPOSURE_ALERT_USD", "25000"))
+SERVING_DB_URL = os.getenv("SERVING_DB_URL")
 
 LAKE_BRONZE = Asset(name="lake_bronze", uri=f"file://{LAKE_DIR}/bronze")
 RECON_GOLD = Asset(name="recon_gold", uri=f"file://{WAREHOUSE_PATH}#gold")
@@ -72,7 +73,18 @@ def transform_reconciliation():
                 log.info(line)
         return summary
 
-    dbt_build() >> report_breaks()
+    @task
+    def publish_gold() -> dict[str, int]:
+        """Copy gold tables to the Postgres serving DB that Metabase reads."""
+        from serving.publish import publish
+
+        if not SERVING_DB_URL:
+            log.info("SERVING_DB_URL not set; skipping publish")
+            return {}
+        return publish(WAREHOUSE_PATH, SERVING_DB_URL)
+
+    built = dbt_build()
+    built >> [publish_gold(), report_breaks()]
 
 
 transform_reconciliation()

@@ -1,5 +1,7 @@
-# Local Airflow 3 for the reconciliation pipeline.
-#   docker compose up --build   ->   http://localhost:8080
+# Local stack for the reconciliation pipeline.
+#   docker compose up --build
+#   Airflow  -> http://localhost:8080
+#   Metabase -> http://localhost:3000
 services:
   airflow:
     build: .
@@ -16,6 +18,41 @@ services:
       LAKE_DIR: /opt/project/data/lake
       WAREHOUSE_PATH: /opt/project/data/warehouse.duckdb
       DBT_BIN: /home/airflow/dbt-venv/bin/dbt
+      SERVING_DB_URL: postgresql://recon:recon@serving-db:5432/serving
       INGEST_SOURCE: ${INGEST_SOURCE:-kraken}   # set to "synthetic" to run offline
     volumes:
       - .:/opt/project
+    depends_on:
+      serving-db:
+        condition: service_healthy
+
+  # Serving layer: gold tables are published here after every dbt build
+  serving-db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: recon
+      POSTGRES_PASSWORD: recon
+      POSTGRES_DB: serving
+    ports:
+      - "5432:5432"
+    volumes:
+      - serving-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U recon -d serving"]
+      interval: 5s
+      retries: 10
+
+  metabase:
+    image: metabase/metabase:v0.64.6
+    ports:
+      - "3000:3000"
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    volumes:
+      - metabase-data:/metabase-data
+    depends_on:
+      - serving-db
+
+volumes:
+  serving-data:
+  metabase-data:
