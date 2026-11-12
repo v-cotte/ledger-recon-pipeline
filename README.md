@@ -4,6 +4,10 @@ An automated daily reconciliation between what happened on the exchange, what th
 
 Built as a small lakehouse: **Airflow 3** orchestration, **Parquet** landing zone, **dbt** in a bronze → silver → gold medallion, tests that prove the reconciliation catches every break, **Elementary** anomaly monitoring, a **Metabase** dashboard, **Terraform** for the AWS side, and **GitHub Actions** CI. It uses real BTC/USD trades from Kraken's public API as sample data, but the pattern applies to any ledger: payments, brokerage, marketplace payouts or revenue.
 
+![Metabase dashboard: match rate, breaks by type, USD exposure and open breaks. Nov 10 is a simulated bad day; Nov 11 is real Kraken data.](docs/dashboard.png)
+
+*Metabase dashboard. November 10 is a simulated bad day (fewer trades, 6% break rate per type), which Elementary flags as an anomaly; November 11 is a real day of Kraken trades.*
+
 ## The problem
 
 Every trade exists in three places, and they should agree:
