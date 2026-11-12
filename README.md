@@ -113,6 +113,10 @@ docker compose exec airflow airflow backfill create --dag-id ingest_trades \
   --from-date 2026-11-02 --to-date 2026-11-08
 ```
 
+## Infrastructure as code
+
+[`infra/terraform`](infra/terraform) defines the production side: S3 lake with Glacier lifecycle for raw files, Glue databases per layer, an Athena workgroup with a cost guardrail, and a least-privilege pipeline role. CI runs `terraform fmt` and `terraform validate` on every push; `terraform output dbt_athena_profile` prints the dbt prod target.
+
 ## From local to production
 
 The design maps one-to-one to an AWS lakehouse:
@@ -123,6 +127,7 @@ The design maps one-to-one to an AWS lakehouse:
 | DuckDB `read_parquet` sources | Glue Data Catalog tables |
 | dbt-duckdb | dbt-athena with `table_type: iceberg` (target stubbed in `dbt/profiles.yml`) |
 | `airflow standalone` in Docker | Airflow on Kubernetes / Astronomer |
+| Manual setup | `infra/terraform`: S3 + Glue + Athena + IAM |
 | Simulated ledger | CDC from the app's Postgres (Airbyte / DMS) |
 | Log warning on high exposure | Slack / PagerDuty alert to the Accounting on-call |
 
@@ -133,5 +138,6 @@ ingestion/   sources (Kraken, synthetic), simulator with planted breaks, lake wr
 dags/        ingest_trades (daily, retries, backfill) · transform_reconciliation (asset-driven)
 dbt/         bronze → silver → gold models, schema + singular tests
 scripts/     run_local.sh
-.github/     CI: ingest 5 weeks, dbt build, re-run a day with fewer trades to check idempotency
+infra/       Terraform for the AWS lakehouse (S3, Glue, Athena, IAM)
+.github/     CI: ingest 5 weeks, dbt build, re-run a day with fewer trades; terraform fmt + validate
 ```

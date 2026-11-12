@@ -35,3 +35,18 @@ jobs:
         run: |
           python -m ingestion.run --date 2026-11-07 --source synthetic --max-trades 150
           dbt build --project-dir dbt --profiles-dir dbt
+
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Format check
+        run: terraform fmt -check -recursive
+      - name: Init (no backend, no AWS credentials needed)
+        run: terraform init -backend=false
+      - name: Validate
+        run: terraform validate
